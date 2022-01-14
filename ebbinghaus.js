@@ -22,23 +22,27 @@ function getEbbinghausDay(ymd) {
 	return 0;
 }
 
+function getEbbinghaus() {
+	const ebbinghaus = {};
+	const stats = require('../cache').get(h.KEYS.stat) || {};
+	for (let k of _.keys(stats)) {
+		const d = getEbbinghausDay(k);
+		(stats[k]['ac.set']||[]).forEach(function(id) {
+			if (id in ebbinghaus) {
+				ebbinghaus[id] = Math.min(ebbinghaus[id], d);
+			} else {
+				ebbinghaus[id] = d;
+			}
+		});
+	}
+	return ebbinghaus;
+}
+
 function getProblems(needTranslation, cb) {
   plugin.next.getProblems(needTranslation, function(e, problems) {
     if (e) return cb(e);
 
-		const ebbinghaus = {};
-		const stats = require('../cache').get(h.KEYS.stat) || {};
-		for (let k of _.keys(stats)) {
-			const d = getEbbinghausDay(k);
-			(stats[k]['ac.set']||[]).forEach(function(id) {
-				if (id in ebbinghaus) {
-					ebbinghaus[id] = Math.min(ebbinghaus[id], d);
-				} else {
-					ebbinghaus[id] = d;
-				}
-			});
-		}
-
+		const ebbinghaus = getEbbinghaus();
 		problems = problems.filter(function(x) {
 			if ((ebbinghaus[x.fid]||0) > 0) {
 				x.tags = (x.tags || []).concat(['days-' + ebbinghaus[x.fid]]);
@@ -56,18 +60,7 @@ function pickProblem(needTranslation, cb) {
   plugin.next.getProblems(needTranslation, function(e, problems) {
     if (e) return cb(e);
 
-		const ebbinghaus = {};
-		const stats = require('../cache').get(h.KEYS.stat) || {};
-		for (let k of _.keys(stats)) {
-			const d = getEbbinghausDay(k);
-			(stats[k]['ac.set']||[]).forEach(function(id) {
-				if (id in ebbinghaus) {
-					ebbinghaus[id] = Math.min(ebbinghaus[id], d);
-				} else {
-					ebbinghaus[id] = d;
-				}
-			});
-		}
+		const ebbinghaus = getEbbinghaus();
 		const ebbinghaus_list = {};
 		let max_days = 0;
 		for (let id of _.keys(ebbinghaus)) {
