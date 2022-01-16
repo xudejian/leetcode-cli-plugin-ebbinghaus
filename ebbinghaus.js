@@ -11,29 +11,55 @@ const show_aliases = require('../commands/show').aliases;
 var plugin = new Plugin(300, 'ebbinghaus', '2021.12.30',
     'Plugin to show problem in ebbinhaus order.');
 
-function getEbbinghausDay(ymd) {
-	const d = moment().diff(moment(ymd, 'YYYY-MM-DD'), 'days');
-	const ebbinghaus_days = [180, 90, 30, 15, 7, 4, 2, 1];
-	for (let diff of ebbinghaus_days) {
-		if (d >= diff) {
-			return diff;
-		}
-	}
-	return 0;
-}
-
 function getEbbinghaus() {
-	const ebbinghaus = {};
+	const ac = {};
 	const stats = require('../cache').get(h.KEYS.stat) || {};
 	for (let k of _.keys(stats)) {
-		const d = getEbbinghausDay(k);
+		const d = moment().diff(moment(k, 'YYYY-MM-DD'), 'days');
 		(stats[k]['ac.set']||[]).forEach(function(id) {
-			if (id in ebbinghaus) {
-				ebbinghaus[id] = Math.min(ebbinghaus[id], d);
-			} else {
-				ebbinghaus[id] = d;
-			}
+			ac[id] = ac[id] || {};
+			ac[id][d] = true;
 		});
+	}
+
+	const ebbinghaus = {};
+	for (let id of _.keys(ac)) {
+		if (ac[id][0]||false) {
+			continue;
+		}
+		const days = _.keys(ac[id]).sort();
+		const task_days            = [1, 2, 4, 7, 15, 30, 90, 180];
+		const next_task_after_days = [1, 1, 2, 3,  8, 15, 60, 90];
+		let i = days.length-1;
+		let j = i-1;
+		let k = 0;
+		while (i > 0 && j>=0) {
+			const d = days[i] - days[j];
+			if (d < next_task_after_days[k]) {
+				log.debug('review early than expect: ' + id);
+				j--;
+			} else if (d == next_task_after_days[k]) {
+				log.debug('review as expect: ' + id + ' in days ' + task_days[k]);
+				k++;
+				i = j;
+				if (k>= next_task_after_days.length) {
+					i--;
+					k = 0;
+				}
+				j = i-1;
+			} else {
+				log.debug('review later than expect: ' + id + ' in days ' + task_days[k]);
+				i--;
+			}
+		}
+		if (i<0) {
+			log.debug('complete full cycle: ' + id);
+			continue;
+		}
+		log.debug('previous day:' + i + days[i] + ' expect wait ' + k + ' cur ' + j);
+		if (days[i] >= next_task_after_days[k]) {
+			ebbinghaus[id] = task_days[k];
+		}
 	}
 	return ebbinghaus;
 }
@@ -51,7 +77,7 @@ function getProblems(needTranslation, cb) {
 			}
 			return false;
 		});
-		console.log('list in ebbinghaus');
+		log.debug('list in ebbinghaus');
     return cb(null, problems);
   });
 }
@@ -69,15 +95,18 @@ function pickProblem(needTranslation, cb) {
 			max_days = Math.max(max_days, ebbinghaus[id]);
 		}
 
-		problems = problems.filter(function(x) {
-			if (x.fid in ebbinghaus_list[max_days]) {
+		let _problems = problems.filter(function(x) {
+			if (x.fid in (ebbinghaus_list[max_days]||{})) {
 				x.state = 'review';
 				return true;
 			}
 			return false;
 		});
-		const problem = _.sample(problems);
-		console.log('pick in ebbinghaus');
+		if (_problems.length == 0) {
+			_problems = problems;
+			log.info('ebbinghaus list is empty');
+		}
+		const problem = _.sample(_problems);
     return cb(null, [problem]);
   });
 }
