@@ -10,5 +10,5 @@ Fetch the problem in ebbinghaus order.
 
 ## Usage
 
-    $ leetcode list --ebbinghaus
+    $ leetcode stat --ebbinghaus
     $ leetcode show --ebbinghaus
