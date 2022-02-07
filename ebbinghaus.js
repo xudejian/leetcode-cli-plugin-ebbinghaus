@@ -42,8 +42,8 @@ function getEbbinghaus() {
 			if (d < next_task_after_days[k]) {
 				log.debug('[' + id +'] review early: ' + d + ' expect: ' + next_task_after_days[k]);
 				j--;
-			} else if (d == next_task_after_days[k]) {
-				log.debug('[' + id +'] review as expect: '+d+' in task day ' + task_days[k]);
+			} else if (d == next_task_after_days[k] || d-1 == next_task_after_days[k]) {
+				log.debug('[' + id +'] review expect: '+d+'/'+next_task_after_days[k]+' in task day ' + task_days[k]);
 				k++;
 				i = j;
 				if (k>= next_task_after_days.length) {
