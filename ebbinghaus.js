@@ -40,10 +40,10 @@ function getEbbinghaus() {
 		while (i > 0 && j>=0) {
 			const d = days[i] - days[j];
 			if (d < next_task_after_days[k]) {
-				log.debug('review early: ' + id);
+				log.debug('[' + id +'] review early: ' + d + ' expect: ' + next_task_after_days[k]);
 				j--;
 			} else if (d == next_task_after_days[k]) {
-				log.debug('review as expect: ' + id + ' in days ' + task_days[k]);
+				log.debug('[' + id +'] review as expect: '+d+' in task day ' + task_days[k]);
 				k++;
 				i = j;
 				if (k>= next_task_after_days.length) {
@@ -52,15 +52,16 @@ function getEbbinghaus() {
 				}
 				j = i-1;
 			} else {
-				log.debug('review later: ' + id + ' in days ' + task_days[k]);
+				log.debug('[' + id +'] review later: '+d+'/'+next_task_after_days[k]+' ['+i+'/'+j+']');
 				i--;
+				j = i-1;
 			}
 		}
 		if (i<0) {
-			log.debug('complete full cycle: ' + id);
+			log.debug('[' + id +'] complete full cycle');
 			continue;
 		}
-		log.debug('previous day:' + i + ' ' + days[i] + ' expect wait ' + k + ' cur ' + j);
+		log.debug('[' + id +'] previous day: ' + days[i] + '/' + next_task_after_days[k]);
 		if (days[i] >= next_task_after_days[k]) {
 			ebbinghaus[id] = task_days[k];
 		}
@@ -88,7 +89,7 @@ function statProblems(needTranslation, cb) {
 function showGraph(problems) {
   const ICONS = {
     ac:    chalk.green(icon.ac),
-    notac: chalk.red(icon.notac),
+    yes: chalk.red(icon.yes),
     none:  chalk.gray(icon.none),
     empty: icon.empty
   };
@@ -103,6 +104,9 @@ function showGraph(problems) {
 			if (d <= 90) {
 				line[94-d] = ICONS.ac;
 			}
+		}
+		if (line[94]==ICONS.ac) {
+			line[94] = ICONS.yes;
 		}
     log.info(line.join(''));
 	}
