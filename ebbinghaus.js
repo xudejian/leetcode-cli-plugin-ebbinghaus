@@ -1,6 +1,8 @@
 var moment = require('moment');
 var _ = require('underscore');
 
+var cache = require('../cache');
+var core = require('../core');
 var chalk = require('../chalk');
 var icon = require('../icon');
 var log = require('../log');
@@ -16,7 +18,7 @@ var plugin = new Plugin(300, 'ebbinghaus', '2021.12.30',
 
 function getEbbinghaus() {
 	const ac = {};
-	const stats = require('../cache').get(h.KEYS.stat) || {};
+	const stats = cache.get(h.KEYS.stat) || {};
 	for (let k of _.keys(stats)) {
 		const d = moment().diff(moment(k, 'YYYY-MM-DD'), 'days');
 		(stats[k]['ac.set']||[]).forEach(function(id) {
@@ -69,10 +71,49 @@ function getEbbinghaus() {
 	return ebbinghaus;
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function rebuildStat(problems) {
+	const stats = cache.get(h.KEYS.stat) || {};
+
+	for (let p of problems) {
+		if (p.state === 'ac') {
+			await sleep(1000);
+			core.getSubmissions(p, function(e, submissions) {
+				if (e) return;
+				for (let subm of submissions) {
+					if (subm.status_display === 'Accepted') {
+						const day = moment.unix(subm.timestamp).format('YYYY-MM-DD');
+						const stat = stats[day] = stats[day] || {};
+						const k = 'ac.set';
+						const s = new Set(stat[k] || []);
+						s.add(p.fid);
+						stat[k] = Array.from(s);
+						stat['ac'] = s.size;
+						log.debug(day + ' ' + p.fid);
+					}
+				}
+			});
+		}
+	}
+
+	cache.set(h.KEYS.stat, stats);
+}
+
 function statProblems(needTranslation, cb) {
   plugin.next.getProblems(needTranslation, function(e, problems) {
+		if (!('ebbinghaus' in session.argv)) {
+			return cb(e, problems);
+		}
     if (e) return cb(e);
 
+		if ('rebuild' in session.argv) {
+			rebuildStat(problems);
+		}
 		const ac = {};
 		const stats = require('../cache').get(h.KEYS.stat) || {};
 		for (let k of _.keys(stats)) {
@@ -91,6 +132,7 @@ function showGraph(problems) {
     ac:    chalk.green(icon.ac),
     yes: chalk.red(icon.yes),
     none:  chalk.gray(icon.none),
+    next:  chalk.gray(icon.yes),
     empty: icon.empty
   };
 
@@ -114,6 +156,9 @@ function showGraph(problems) {
 }
 
 function pickProblem(needTranslation, cb) {
+	if (session.argv.keyword) {
+		return plugin.next.getProblems(needTranslation, cb);
+	}
   plugin.next.getProblems(needTranslation, function(e, problems) {
     if (e) return cb(e);
 
@@ -137,12 +182,15 @@ function pickProblem(needTranslation, cb) {
 			_problems = problems;
 			log.info('ebbinghaus list is empty');
 		}
-		const problem = _.sample(_problems);
-    return cb(null, [problem]);
+    return cb(null, _problems);
   });
 }
 
-const aliases = {'stat':statProblems, 'show':pickProblem};
+const aliases = {
+	'stat':statProblems,
+	'show':pickProblem,
+};
+
 for (let a of stat_aliases) {
 	aliases[a] = statProblems;
 }
@@ -151,7 +199,7 @@ for (let a of show_aliases) {
 }
 
 plugin.getProblems = function (needTranslation, cb) {
-	if (_.isArray(session.argv._) && session.argv.ebbinghaus) {
+	if (_.isArray(session.argv._)) {
 		const cmd = session.argv._[0]||'';
 		return (aliases[cmd] || plugin.next.getProblems)(needTranslation, cb);
 	}
