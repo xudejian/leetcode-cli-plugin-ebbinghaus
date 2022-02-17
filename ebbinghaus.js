@@ -12,6 +12,7 @@ var sprintf = require('../sprintf');
 var h = require('../helper');
 const stat_aliases = require('../commands/stat').aliases;
 const show_aliases = require('../commands/show').aliases;
+const show_handler = require('../commands/show').handler;
 
 var plugin = new Plugin(300, 'ebbinghaus', '2021.12.30',
     'Plugin to show problem in ebbinhaus order.');
@@ -156,12 +157,7 @@ function showGraph(problems) {
 }
 
 function pickProblem(needTranslation, cb) {
-	if (session.argv.keyword) {
-		return plugin.next.getProblems(needTranslation, cb);
-	}
-  plugin.next.getProblems(needTranslation, function(e, problems) {
-    if (e) return cb(e);
-
+	if (!session.argv.keyword) {
 		const ebbinghaus = getEbbinghaus();
 		const ebbinghaus_list = {};
 		let max_days = 0;
@@ -170,20 +166,15 @@ function pickProblem(needTranslation, cb) {
 			ebbinghaus_list[ebbinghaus[id]][id] = true;
 			max_days = Math.max(max_days, ebbinghaus[id]);
 		}
-
-		let _problems = problems.filter(function(x) {
-			if (x.fid in (ebbinghaus_list[max_days]||{})) {
-				x.state = 'review';
-				return true;
-			}
-			return false;
-		});
-		if (_problems.length == 0) {
-			_problems = problems;
-			log.info('ebbinghaus list is empty');
+		const fids = _.keys(ebbinghaus_list[max_days]);
+		if (fids.length > 0) {
+			session.argv.keyword = fids[0];
+			log.info('review ' +fids[0] + ' task:' + max_days);
+			return show_handler(session.argv);
 		}
-    return cb(null, _problems);
-  });
+	}
+
+	return plugin.next.getProblems(needTranslation, cb);
 }
 
 const aliases = {
