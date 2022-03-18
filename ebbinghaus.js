@@ -1,8 +1,11 @@
 var moment = require('moment');
 var _ = require('underscore');
+var request = require('request');
 
+var leetcode = require('./leetcode');
 var cache = require('../cache');
 var core = require('../core');
+var config = require('../config');
 var chalk = require('../chalk');
 var icon = require('../icon');
 var log = require('../log');
@@ -14,8 +17,27 @@ const stat_aliases = require('../commands/stat').aliases;
 const show_aliases = require('../commands/show').aliases;
 const show_handler = require('../commands/show').handler;
 
-var plugin = new Plugin(300, 'ebbinghaus', '2021.12.30',
+var plugin = new Plugin(500, 'ebbinghaus', '2021.12.30',
     'Plugin to show problem in ebbinhaus order.');
+
+function countNewLearned() {
+	const ac = {};
+	const stats = cache.get(h.KEYS.stat) || {};
+	for (let k of _.keys(stats)) {
+		const d = moment().diff(moment(k, 'YYYY-MM-DD'), 'days');
+		(stats[k]['ac.set']||[]).forEach(function(id) {
+			ac[id] = ac[id] || new Set();
+			ac[id].add(d);
+		});
+	}
+	let count = 0;
+	for (let id of _.keys(ac)) {
+		if (ac[id].size === 1 && ac[id].has(0)) {
+			count++;
+		}
+	}
+	return count;
+}
 
 function getEbbinghaus() {
 	const ac = {};
@@ -45,7 +67,7 @@ function getEbbinghaus() {
 			if (d < next_task_after_days[k]) {
 				log.debug('[' + id +'] review early: ' + d + ' expect: ' + next_task_after_days[k]);
 				j--;
-			} else if (d == next_task_after_days[k] || d-1 == next_task_after_days[k]) {
+			} else if (d == next_task_after_days[k] || d-1 == next_task_after_days[k] || d-2 == next_task_after_days[k]) {
 				log.debug('[' + id +'] review expect: '+d+'/'+next_task_after_days[k]+' in task day ' + task_days[k]);
 				k++;
 				i = j;
@@ -105,38 +127,37 @@ async function rebuildStat(problems) {
 	cache.set(h.KEYS.stat, stats);
 }
 
-function statProblems(needTranslation, cb) {
-  plugin.next.getProblems(needTranslation, function(e, problems) {
-		if (!('ebbinghaus' in session.argv)) {
-			return cb(e, problems);
-		}
-    if (e) return cb(e);
+function statProblems(e, problems, cb) {
+	if (!('ebbinghaus' in session.argv)) {
+		return cb(e, problems);
+	}
+	if (e) return cb(e);
 
-		if ('rebuild' in session.argv) {
-			rebuildStat(problems);
-		}
-		const ac = {};
-		const stats = require('../cache').get(h.KEYS.stat) || {};
-		for (let k of _.keys(stats)) {
-			const d = moment().diff(moment(k, 'YYYY-MM-DD'), 'days');
-			(stats[k]['ac.set']||[]).forEach(function(id) {
-				ac[id] = ac[id] || {};
-				ac[id][d] = true;
-			});
-		}
-		showGraph(ac);
-  });
+	if ('rebuild' in session.argv) {
+		rebuildStat(problems);
+	}
+	const ac = {};
+	const stats = require('../cache').get(h.KEYS.stat) || {};
+	for (let k of _.keys(stats)) {
+		const d = moment().diff(moment(k, 'YYYY-MM-DD'), 'days');
+		(stats[k]['ac.set']||[]).forEach(function(id) {
+			ac[id] = ac[id] || {};
+			ac[id][d] = true;
+		});
+	}
+	showGraph(ac);
 }
 
 function showGraph(problems) {
   const ICONS = {
     ac:    chalk.green(icon.ac),
-    yes: chalk.red(icon.yes),
+    yes: chalk.blue(icon.yes),
     none:  chalk.gray(icon.none),
     next:  chalk.gray(icon.yes),
     empty: icon.empty
   };
 
+	let count = 0;
 	for (const [key, value] of Object.entries(problems)) {
 		let line = new Array(95).fill(ICONS.none);
 		let fid = sprintf(' %04s', key);
@@ -150,31 +171,47 @@ function showGraph(problems) {
 		}
 		if (line[94]==ICONS.ac) {
 			line[94] = ICONS.yes;
+			if (Object.keys(value).length == 1) {
+				line[94] = chalk.red(icon.yes);
+			}
+			count++;
 		}
     log.info(line.join(''));
 	}
-  log.info();
+	log.info('Today total ' + count);
 }
 
-function pickProblem(needTranslation, cb) {
+function review() {
+	const ebbinghaus = getEbbinghaus();
+	log.info('review ['+_.keys(ebbinghaus).length+'] list: ' + JSON.stringify(ebbinghaus));
+	const ebbinghaus_list = {};
+	let max_days = 0;
+	for (let id of _.keys(ebbinghaus)) {
+		ebbinghaus_list[ebbinghaus[id]] = ebbinghaus_list[ebbinghaus[id]] || {};
+		ebbinghaus_list[ebbinghaus[id]][id] = true;
+		max_days = Math.max(max_days, ebbinghaus[id]);
+	}
+	const fids = _.keys(ebbinghaus_list[max_days]);
+	if (fids.length > 0) {
+		session.argv.keyword = fids[0];
+		log.info('review ' +fids[0] + ' task:' + max_days);
+		show_handler(session.argv);
+		return fids[0];
+	}
+	return -1;
+}
+
+function pickProblem(e, problems, cb) {
 	if (!session.argv.keyword) {
-		const ebbinghaus = getEbbinghaus();
-		const ebbinghaus_list = {};
-		let max_days = 0;
-		for (let id of _.keys(ebbinghaus)) {
-			ebbinghaus_list[ebbinghaus[id]] = ebbinghaus_list[ebbinghaus[id]] || {};
-			ebbinghaus_list[ebbinghaus[id]][id] = true;
-			max_days = Math.max(max_days, ebbinghaus[id]);
-		}
-		const fids = _.keys(ebbinghaus_list[max_days]);
-		if (fids.length > 0) {
-			session.argv.keyword = fids[0];
-			log.info('review ' +fids[0] + ' task:' + max_days);
-			return show_handler(session.argv);
+		const learn = session.argv.learn || 0;
+		if (learn === 0 || countNewLearned() >= learn) {
+			if (review() !== -1) {
+				return;
+			}
 		}
 	}
 
-	return plugin.next.getProblems(needTranslation, cb);
+	return cb(e, problems);
 }
 
 const aliases = {
@@ -190,12 +227,16 @@ for (let a of show_aliases) {
 }
 
 plugin.getProblems = function (needTranslation, cb) {
-	if (_.isArray(session.argv._)) {
-		const cmd = session.argv._[0]||'';
-		return (aliases[cmd] || plugin.next.getProblems)(needTranslation, cb);
-	}
+	plugin.next.getProblems(needTranslation, function(e, problems) {
+		if (_.isArray(session.argv._)) {
+			const cmd = session.argv._[0]||'';
+			if (cmd in aliases) {
+				return aliases[cmd](e, problems, cb);
+			}
+		}
 
-	return plugin.next.getProblems(needTranslation, cb);
+		return cb(e, problems);
+	});
 };
 
 module.exports = plugin;
